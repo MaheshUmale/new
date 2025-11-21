@@ -1,0 +1,374 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Multi-Strategy Trading Scanner</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%);
+            color: #ffffff;
+            min-height: 100vh;
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+
+        .header {
+            text-align: center;
+            margin-bottom: 30px;
+            background: rgba(255, 255, 255, 0.1);
+            padding: 20px;
+            border-radius: 15px;
+            backdrop-filter: blur(10px);
+        }
+
+        .header h1 {
+            font-size: 2.5rem;
+            margin-bottom: 10px;
+            background: linear-gradient(45deg, #00ff88, #ff6b35);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .header p {
+            font-size: 1rem;
+            color: #ccc;
+        }
+
+        .section {
+            background: rgba(0, 0, 0, 0.2);
+            padding: 20px;
+            border-radius: 10px;
+            margin-bottom: 20px;
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.3);
+        }
+
+        .section-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            cursor: pointer;
+            padding-bottom: 10px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.2);
+            margin-bottom: 10px;
+        }
+
+        .section-header h2 {
+            font-size: 1.5rem;
+            color: #98c379; /* Greenish color for distinction */
+        }
+
+        .section-content {
+            max-height: 500px; /* Default height */
+            overflow-y: auto;
+            transition: max-height 0.3s ease-in-out;
+        }
+
+        .section-content.collapsed {
+            max-height: 0;
+            overflow: hidden;
+            padding: 0;
+        }
+
+        .data-table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        .data-table th, .data-table td {
+            padding: 12px 15px;
+            text-align: left;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        .data-table th {
+            background-color: rgba(255, 255, 255, 0.1);
+            font-weight: 600;
+            text-transform: uppercase;
+            font-size: 0.85rem;
+            color: #e5e7eb;
+        }
+
+        .data-table tr:hover {
+            background-color: rgba(255, 255, 255, 0.05);
+        }
+
+        .data-table td:nth-child(2) {
+            font-weight: bold;
+        }
+
+        /* Alert Specific Styling */
+        .alert-row {
+            background-color: rgba(255, 107, 53, 0.15); /* Light orange/red background */
+            animation: flash-alert 1.5s ease-out;
+        }
+        
+        .alert-row:nth-child(even) {
+            background-color: rgba(255, 107, 53, 0.1);
+        }
+
+        @keyframes flash-alert {
+            0% { box-shadow: 0 0 10px rgba(255, 107, 53, 0.8); }
+            100% { box-shadow: none; }
+        }
+
+        .alert-row .trigger-type {
+            font-weight: 700;
+            color: #ff6b35;
+        }
+
+        /* Spinner for loading indicator */
+        .spinner {
+            border: 4px solid rgba(255, 255, 255, 0.3);
+            border-top: 4px solid #00ff88;
+            border-radius: 50%;
+            width: 20px;
+            height: 20px;
+            animation: spin 1s linear infinite;
+            display: none;
+            margin-left: 15px;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>Multi-Strategy Trading Scanner Dashboard</h1>
+            <p>Scanning for High Potential (Squeeze) and High Probability (Pullback) Setups</p>
+            <div style="margin-top: 15px; display: flex; justify-content: center; align-items: center;">
+                <span id="scanStatus" style="font-size: 0.9rem; color: #ff6b35;">
+                    Initializing...
+                </span>
+                <div id="loadingIndicator" class="spinner"></div>
+            </div>
+        </div>
+
+        <!-- NEW REAL-TIME ALERTS SECTION (Step 2C) -->
+        <div id="alerts-section" class="section">
+            <div class="section-header" id="alerts-header">
+                <h2 style="color: #ff6b35;">⚡ Real-Time Fired Triggers</h2>
+            </div>
+            <div id="alerts-content" class="section-content">
+                <table class="data-table">
+                    <thead>
+                        <tr>
+                            <th style="width: 10%;">Time</th>
+                            <th style="width: 15%;">Symbol</th>
+                            <th style="width: 20%;">Trigger Type</th>
+                            <th style="width: 15%;">Price</th>
+                            <th style="width: 40%;">Details</th>
+                        </tr>
+                    </thead>
+                    <tbody id="alerts-table-body">
+                        <tr><td colspan="5" style="text-align: center; color: #aaa;">No active alerts found. Awaiting real-time triggers.</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+        <!-- END NEW REAL-TIME ALERTS SECTION -->
+
+        <!-- ACTIVE SETUPS SECTION (Existing Logic) -->
+        <div id="setups-section" class="section">
+            <div class="section-header" id="setups-header">
+                <h2>📈 Active Trade Setups (HTF Scans)</h2>
+            </div>
+            <div id="setups-content" class="section-content">
+                <table class="data-table">
+                    <thead>
+                        <tr>
+                            <th style="width: 10%;">Symbol</th>
+                            <th style="width: 15%;">Strategy</th>
+                            <th style="width: 15%;">Timeframe</th>
+                            <th style="width: 10%;">Potency</th>
+                            <th style="width: 10%;">Fired Timestamp</th>
+                            <th style="width: 50%;">Key Level (BB/EMA20)</th>
+                        </tr>
+                    </thead>
+                    <tbody id="setups-table-body">
+                        <tr><td colspan="5" style="text-align: center; color: #aaa;">Loading trade setups...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+        <!-- END ACTIVE SETUPS SECTION -->
+
+    </div>
+
+    <script>
+        class MultiStrategyDashboard {
+            constructor() {
+                this.setupsContainer = document.getElementById('setups-table-body');
+                this.alertsContainer = document.getElementById('alerts-table-body'); // NEW
+                this.scanStatus = document.getElementById('scanStatus');
+                this.loadingIndicator = document.getElementById('loadingIndicator');
+                this.setupCollapseHeader = document.getElementById('setups-header');
+                this.setupCollapseContent = document.getElementById('setups-content');
+                this.alertsCollapseHeader = document.getElementById('alerts-header'); // NEW
+                this.alertsCollapseContent = document.getElementById('alerts-content'); // NEW
+
+                this.setupEventListeners();
+                this.startAutoRefresh();
+            }
+
+            setupEventListeners() {
+                this.setupCollapseHeader.addEventListener('click', () => this.toggleCollapse(this.setupCollapseContent));
+                this.alertsCollapseHeader.addEventListener('click', () => this.toggleCollapse(this.alertsCollapseContent));
+            }
+
+            toggleCollapse(contentElement) {
+                contentElement.classList.toggle('collapsed');
+            }
+
+            startAutoRefresh() {
+                // Initial fetch
+                this.fetchLatestData();
+                // Refresh every 15 seconds (aligned with the fastest, non-5m-candle, check)
+                setInterval(() => this.fetchLatestData(), 15000); 
+            }
+
+            async fetchLatestData() {
+                this.showLoading();
+                this.scanStatus.textContent = 'Refreshing data...';
+                
+                // Fetch Setups (Slow Scan Results)
+                try { 
+                     
+                        const response = await fetch('/data');
+                        const rawText = await response.text();
+                        // Correct for NaN/null issues on receiving data
+                        const cleanText = rawText.replace(/("?:)\s*NaN(,|\s*})/g, '$1null$2').replace(/("Potency_Score"):(\d+\.?\d*)/g, '"Potency_Score":$2');
+                        const data = JSON.parse(cleanText);
+                        
+                    // const data = await response.json();
+                    this.renderSetups(data);
+                    this.scanStatus.textContent = `Last update: ${new Date().toLocaleTimeString()}`;
+                } catch (error) {
+                    this.scanStatus.textContent = 'Error fetching setups data.';
+                    this.showError(`Setups Fetch Error: ${error.message}`);
+                }
+
+                // Fetch Alerts (Real-Time Triggers - NEW)
+                try {
+                    const alertResponse = await fetch('/alerts');
+
+                    if (!alertResponse.ok) throw new Error('Failed to fetch alerts data.');
+                    // const alerts = await alertResponse.json();
+                    const rawText2 = await alertResponse.text();
+                        // Correct for NaN/null issues on receiving data
+                        const cleanText = rawText2.replace(/("?:)\s*NaN(,|\s*})/g, '$1null$2').replace(/("Potency_Score"):(\d+\.?\d*)/g, '"Potency_Score":$2');
+                        const alerts = JSON.parse(cleanText);
+
+                    this.renderAlerts(alerts);
+                    this.scanStatus.textContent = `Last update: ${new Date().toLocaleTimeString()}`;
+                } catch (error) {
+                    this.scanStatus.textContent = 'Error fetching alert data.';
+                    this.showError(`Alerts Fetch Error: ${error.message}`);
+                } finally {
+                    this.hideLoading();
+                }
+            }
+
+            renderSetups(setups) {
+                this.setupsContainer.innerHTML = '';
+                if (setups.length === 0) {
+                    this.setupsContainer.innerHTML = '<tr><td colspan="5" style="text-align: center; color: #aaa;">No active setups meet current criteria.</td></tr>';
+                    return;
+                }
+
+                setups.sort((a, b) => b.Potency_Score - a.Potency_Score);
+
+                setups.forEach(setup => {
+                    const strategyColor = setup.Strategy_Type === 'High_Potential' ? '#00ff88' : '#3498db';
+                    const keyLevel = setup.Upper_BB > 0 ? setup.Upper_BB : setup.HTF_EMA20_Price;
+                    // console.log('Key Level for', setup.name, 'is', keyLevel);
+                    const keyLevelDisplay = keyLevel > 0 ? `$${keyLevel.toFixed(2)}` : 'N/A';
+                    // console.log('Key Level Display for', setup.name, 'is', keyLevelDisplay);
+                    // console.log('Potency Score for', setup);
+                    const row = this.setupsContainer.insertRow();
+                    console.log(`Rendering Potency Score for ${setup.name}  :: ${setup.Potency_Score}`);
+                        const potencyScoreDisplay = setup.Potency_Score > 0 ? `${setup.Potency_Score.toFixed(2)}` : 'N/A';
+                        // console.log('Potency Score Display for', setup.name, 'is', potencyScoreDisplay);
+						const urlSymbol = setup.ticker.replace(/&/g, "_")
+                    row.innerHTML = `
+                        <td><a href="https://www.tradingview.com/chart/?symbol=${urlSymbol}" target="_blank" style="color: #fff; text-decoration: none;">${setup.name}</a></td>
+                        <td style="color: ${strategyColor};">${setup.Strategy_Type.replace('_', ' ')}</td>
+                        <td>${setup.Breakout_TFs}</td>
+                        
+                        <td>${potencyScoreDisplay}</td>  
+                        <td>${setup.fired_timestamp}</td>  
+                        <td>[Close: ${setup.close} ] [ ${keyLevelDisplay} :${setup.Strategy_Type === 'High_Potential' ? 'Upper BB' : 'EMA20'}]</td>
+                    `;
+                });
+            }
+
+            // NEW FUNCTION TO RENDER ALERTS
+            renderAlerts(alerts) {
+                this.alertsContainer.innerHTML = '';
+                if (alerts.length === 0) {
+                    this.alertsContainer.innerHTML = '<tr><td colspan="5" style="text-align: center; color: #aaa;">No active alerts found. Awaiting real-time triggers.</td></tr>';
+                    return;
+                }
+                console.log('Rendering Alerts:', alerts.length);
+
+                alerts.forEach(alert => {
+                    const triggeredTime = new Date(alert.triggered_at).toLocaleTimeString();
+                    const row = this.alertsContainer.insertRow();
+                    row.classList.add('alert-row');
+                    const urlSymbol = alert.symbol.replace(/&/g, "_")
+
+                    // Determine the color based on the trigger type
+                    const textColor = alert.trigger_type.startsWith('Downside') ? 'brown' : 'green';
+
+    
+                    row.innerHTML = `
+                        <td>${triggeredTime}</td>
+                        <td><a href="https://www.tradingview.com/chart/?symbol=${urlSymbol}" target="_blank" style="color: #fff; text-decoration: none;">${alert.symbol}</a></td>
+                        <td class="trigger-type" style="color: ${textColor};">${alert.trigger_type}</td>
+                        <td>$${alert.current_price.toFixed(2)}</td>
+                        <td>${alert.details}</td>
+                    `;
+                });
+            }
+
+
+            showLoading() {
+                this.loadingIndicator.style.display = 'block';
+            }
+
+            hideLoading() {
+                this.loadingIndicator.style.display = 'none';
+            }
+
+            showMessage(message) {
+                console.log(message);
+            }
+
+            showError(message) {
+                console.error(message);
+                // You might want a more visible error notification here
+            }
+        }
+
+        // Initialize dashboard when page loads
+        document.addEventListener('DOMContentLoaded', () => {
+            new MultiStrategyDashboard();
+        });
+    </script>
+</body>
+</html>

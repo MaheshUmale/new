@@ -1,0 +1,22 @@
+# Multi-Strategy Scanner System Requirements
+# Core dependencies
+flask==2.3.3
+flask-cors==4.0.0
+pymongo==4.5.0
+tradingview-screener==3.0.0
+pandas==2.0.3
+numpy==1.24.3
+
+# Data processing
+python-dateutil==2.8.2
+
+# Optional but recommended for better performance
+lxml==4.9.3
+requests==2.31.0
+
+# Development dependencies (optional)
+pytest==7.4.0
+python-dotenv==1.0.0
+
+# Note: Make sure you have MongoDB installed and running locally
+# or update the MONGODB_URI in config.py to point to your MongoDB instance

@@ -1,0 +1,659 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+    <meta http-equiv="Pragma" content="no-cache">
+    <meta http-equiv="Expires" content="0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Advanced Breakout Dashboard</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <style>
+        /* Base Styles from Original */
+        body { font-family: sans-serif; background-color: #111827; color: white; }
+        .section-title { font-size: 1.5rem; font-weight: 700; margin-bottom: 1rem; padding-bottom: 0.5rem; border-bottom: 2px solid #4b5563; cursor: pointer; display: flex; align-items: center; user-select: none; }
+        .section-title .arrow { margin-right: 12px; transition: transform 0.2s; font-size: 1rem; }
+        .section-title.collapsed .arrow { transform: rotate(-90deg); }
+        .timeframe-box { background-color: #1f2937; border-radius: 8px; padding: 1rem; border: 1px solid #374151; }
+        .grid-container { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 10px; } /* Adjusted minmax for cards */
+        
+        /* New Card-Style Cell for better space use */
+        .stock-card {
+            background-color: #1f2937;
+            border-radius: 6px;
+            padding: 8px;
+            border: 1px solid #374151;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            cursor: pointer;
+            transition: transform 0.1s, box-shadow 0.1s;
+        }
+        .stock-card:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.2);
+        }
+        .card-left { display: flex; align-items: center; }
+        .stock-logo { width: 24px; height: 24px; border-radius: 3px; margin-right: 8px; }
+        .stock-ticker { font-weight: 700; font-size: 1rem; color: #d1d5db; }
+        .card-right { text-align: right; }
+        .breakout-tfs { font-size: 0.75rem; color: #9ca3af; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100px; }
+        .fired-time { font-size: 0.8rem; font-weight: 600; }
+        .rvol-score { font-size: 0.75rem; font-weight: 500; }
+
+        /* Original styles for elements not affected by card change */
+        .tooltip { position: absolute; text-align: center; padding: 8px; font: 12px sans-serif; background: #1f2937; border: 1px solid #4b5563; border-radius: 8px; pointer-events: none; opacity: 0; color: white; z-index: 10; }
+        #scan-btn.loading { cursor: not-allowed; background-color: #374151; }
+        #scan-btn.loading .spinner { display: inline-block; }
+        .spinner { display: none; width: 1rem; height: 1rem; border: 2px solid rgba(255,255,255,.3); border-radius: 50%; border-top-color: #fff; animation: spin 1s ease-in-out infinite; margin-right: 0.5rem; }
+        @keyframes spin { to { transform: rotate(360deg); } }
+    </style>
+</head>
+<body class="bg-gray-900">
+    <div class="container mx-auto p-4 md:p-6">
+        <header class="text-center mb-6">
+            <h1 class="text-2xl md:text-3xl font-bold">Advanced Breakout Dashboard</h1>
+        </header>
+
+        <div class="bg-gray-800 p-3 rounded-lg mb-6 border border-gray-700 flex justify-between items-center">
+            <div class="flex items-center space-x-4">
+                <button id="settings-btn" class="bg-gray-600 hover:bg-gray-700 text-white font-bold py-2 px-3 rounded-md flex items-center justify-center transition">
+                    Settings
+                </button>
+                <button id="scan-btn" class="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-3 rounded-md flex items-center justify-center transition">
+                    <span class="spinner"></span>
+                    Manual Scan
+                </button>
+            </div>
+            <p id="scan-status" class="text-sm text-gray-400"></p>
+        </div>
+
+        <div class="bg-gray-800 p-3 rounded-lg mb-6 border border-gray-700">
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                    <label for="rvol-filter" class="block text-sm font-medium text-gray-300">Filter by RVOL:</label>
+                    <input type="range" id="rvol-filter" name="rvol-filter" min="0" max="10" value="0" step="0.5" class="w-full h-2 bg-gray-600 rounded-lg appearance-none cursor-pointer">
+                    <span id="rvol-value" class="text-sm text-gray-400">0</span>
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-300">Filter by Timeframe:</label>
+                    <div id="timeframe-filters" class="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 gap-2 mt-2">
+                        </div>
+                </div>
+            </div>
+        </div>
+
+        <div id="main-content">
+            <div id="fired-section-wrapper" class="mb-8">
+                <h2 id="fired-title" class="section-title"><span class="arrow">&#9662;</span>Recent Breakouts (Grouped)</h2>
+                <div id="fired-container" class="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-6">
+                    <p class='col-span-full text-gray-400 text-center py-4'>Run a scan to see recent breakouts.</p>
+                </div>
+            </div>
+
+            <div id="all-fired-section-wrapper" class="mb-8">
+                <h2 id="all-fired-title" class="section-title collapsed"><span class="arrow">&#9662;</span>All Breakouts Today (Grouped)</h2>
+                <div id="all-fired-container" style="display: none;" class="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-6">
+                    <p class='col-span-full text-gray-400 text-center py-4' id="all-fired-status">Loading all fired events...</p>
+                </div>
+            </div>
+        </div>
+
+        <div class="tooltip"></div>
+
+        <div id="settings-modal" class="fixed inset-0 bg-black bg-opacity-50 hidden flex items-center justify-center z-30">
+            <div class="bg-gray-800 rounded-lg shadow-xl p-6 w-full max-w-md border border-gray-700">
+                <div class="flex justify-between items-center mb-4">
+                    <h3 class="text-lg font-bold">Scanner Settings</h3>
+                    <button id="close-settings-btn" class="text-gray-400 hover:text-white">&times;</button>
+                </div>
+                <form id="settings-form">
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <input type="hidden" id="market" name="market">
+                        <div class="col-span-2">
+                            <label class="block text-sm font-medium text-gray-300">Market Presets</label>
+                            <div class="mt-2 flex items-center">
+                                <span class="text-sm font-medium text-gray-400 mr-3">India</span>
+                                <label for="market-toggle" class="inline-flex relative items-center cursor-pointer">
+                                    <input type="checkbox" value="" id="market-toggle" class="sr-only peer">
+                                    <div class="w-11 h-6 bg-gray-600 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-800 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
+                                </label>
+                                <span class="text-sm font-medium text-gray-400 ml-3">America</span>
+                            </div>
+                        </div>
+                        <div>
+                            <label for="min_price" class="block text-sm font-medium text-gray-300">Min Price</label>
+                            <input type="number" id="min_price" name="min_price" class="mt-1 block w-full bg-gray-700 border border-gray-600 rounded-md shadow-sm py-2 px-3 text-white focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm">
+                        </div>
+                        <div>
+                            <label for="max_price" class="block text-sm font-medium text-gray-300">Max Price</label>
+                            <input type="number" id="max_price" name="max_price" class="mt-1 block w-full bg-gray-700 border border-gray-600 rounded-md shadow-sm py-2 px-3 text-white focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm">
+                        </div>
+                        <div>
+                            <label for="min_volume" class="block text-sm font-medium text-gray-300">Min Volume</label>
+                            <input type="number" id="min_volume" name="min_volume" class="mt-1 block w-full bg-gray-700 border border-gray-600 rounded-md shadow-sm py-2 px-3 text-white focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm">
+                        </div>
+                        <div>
+                            <label for="min_value_traded" class="block text-sm font-medium text-gray-300">Min Value Traded</label>
+                            <input type="number" id="min_value_traded" name="min_value_traded" class="mt-1 block w-full bg-gray-700 border border-gray-600 rounded-md shadow-sm py-2 px-3 text-white focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm">
+                        </div>
+                          <div>
+                            <label for="RVOL_threshold" class="block text-sm font-medium text-gray-300">RVOL Threshold</label>
+                            <input type="number" id="RVOL_threshold" name="RVOL_threshold" step="0.1" class="mt-1 block w-full bg-gray-700 border border-gray-600 rounded-md shadow-sm py-2 px-3 text-white focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm">
+                        </div>
+                        <div>
+                            <label for="beta_1_year" class="block text-sm font-medium text-gray-300">Beta (1-year)</label>
+                            <input type="number" id="beta_1_year" name="beta_1_year" step="0.1" class="mt-1 block w-full bg-gray-700 border border-gray-600 rounded-md shadow-sm py-2 px-3 text-white focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm">
+                        </div>
+                    </div>
+                    <div class="mt-6 flex justify-end space-x-3">
+                        <button type="button" id="cancel-settings-btn" class="bg-gray-600 hover:bg-gray-700 text-white font-bold py-2 px-4 rounded-md transition">Cancel</button>
+                        <button type="submit" class="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-md transition">Save</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const firedContainer = d3.select("#fired-container");
+        const tooltip = d3.select(".tooltip");
+        const scanStatus = document.getElementById('scan-status');
+        const allFiredContainer = d3.select('#all-fired-container');
+        const allFiredTitle = document.getElementById('all-fired-title');
+        const settingsBtn = document.getElementById('settings-btn');
+        const settingsModal = document.getElementById('settings-modal');
+        const closeSettingsBtn = document.getElementById('close-settings-btn');
+        const cancelSettingsBtn = document.getElementById('cancel-settings-btn');
+        const settingsForm = document.getElementById('settings-form');
+        const rvolFilter = document.getElementById('rvol-filter');
+        const rvolValue = document.getElementById('rvol-value');
+        const timeframeFilters = document.getElementById('timeframe-filters');
+
+        let autoRefreshInterval;
+        let allFiredRefreshInterval;
+        let isAllFiredLoaded = false;
+        let latestData = { fired: [] };
+        let allFiredData = [];
+        
+        const tfOrder = ['1m', '3m', '5m', '15m', '30m', '1H', '2H', '4H', 'Daily', 'Weekly', 'Monthly'];
+        
+        // New Timeframe Grouping Logic
+        const TF_GROUPS = {
+            '1m': '1. Ultra-Short (1m, 3m, 5m, 15m)',
+            '3m': '1. Ultra-Short (1m, 3m, 5m, 15m)',
+            '5m': '1. Ultra-Short (1m, 3m, 5m, 15m)',
+            '15m': '1. Ultra-Short (1m, 3m, 5m, 15m)',
+            '30m': '2. Short-Term (30m, 1H, 2H)',
+            '1H': '2. Short-Term (30m, 1H, 2H)',
+            '2H': '2. Short-Term (30m, 1H, 2H)',
+            '4H': '3. Swing/Long-Term (4H+)',
+            'Daily': '3. Swing/Long-Term (4H+)',
+            'Weekly': '3. Swing/Long-Term (4H+)',
+            'Monthly': '3. Swing/Long-Term (4H+)',
+            'Unknown': '3. Swing/Long-Term (4H+)'
+        };
+        function getGroupKey(tf) {
+            return TF_GROUPS[tf] || '3. Swing/Long-Term (4H+)';
+        }
+
+        const rvolDomain = [0, 5];
+        const bullishColor = d3.scaleLinear().domain(rvolDomain).range(["#064e3b", "#10b981"]).clamp(true);
+        const bearishColor = d3.scaleLinear().domain(rvolDomain).range(["#7f1d1d", "#ef4444"]).clamp(true);
+        const neutralColor = d3.scaleLinear().domain(rvolDomain).range(["#374151", "#6b7280"]).clamp(true);
+
+        function timeAgo(dateString) {
+            if (!dateString) return 'N/A';
+            try {
+                const date = new Date(dateString);
+                const now = new Date();
+                const seconds = Math.floor((now - date) / 1000);
+                const minutesElapsed = Math.floor(seconds / 60);
+                if (minutesElapsed < 1) return 'Just now';
+                if (minutesElapsed <= 5) return '5m ago';
+                if (minutesElapsed <= 15) return '15m ago';
+                if (minutesElapsed <= 30) return '30m ago';
+                const hoursElapsed = Math.floor(minutesElapsed / 60);
+                if (hoursElapsed < 24) return hoursElapsed + ' hr ago';
+                return Math.floor(hoursElapsed / 24) + ' day(s) ago';
+            } catch (e) {
+                return 'Invalid Time';
+            }
+        }
+
+        function getCellColor(d) {
+            if (d.momentum === 'Bullish') return bullishColor(d.relative_volume_10d_calc);
+            if (d.momentum === 'Bearish') return bearishColor(d.relative_volume_10d_calc);
+            return neutralColor(d.relative_volume_10d_calc);
+        }
+
+        function formatTime(dateString) {
+            const date = new Date(dateString);
+            return date.toTimeString().slice(0, 5); // HH:MM
+        }
+
+        function prepTickerForUrl(ticker) {
+            // Original logic for TradingView URL
+            processedSymbol = ticker.replace(/&/g, "_");
+            return encodeURIComponent(processedSymbol.replace(/&amp;/g, "_"));
+        }
+        
+        function getTooltipHtml(d) {
+            const ticker = d.ticker ? d.ticker.replace('NSE:', '') : d.name ? d.name.replace('NSE:', '') : 'N/A';
+            const breakoutTFs = Array.isArray(d.Breakout_TFs) ? d.Breakout_TFs.join(', ') : d.Breakout_TFs;
+            const breakoutType = d.breakout_type || 'Breakout';
+            const potencyScoreHtml = d.Potency_Score !== undefined ? `Potency Score: <strong>${d.Potency_Score.toFixed(2)}</strong><br/>` : '';
+            const numTFs = Array.isArray(d.Breakout_TFs) ? d.Breakout_TFs.length : 1;
+
+            return `
+                <strong>${ticker}</strong><br/>
+                ${breakoutType} on TFs: <strong>${numTFs}</strong><br/>
+                Time: ${formatTime(d.fired_timestamp)} (${timeAgo(d.fired_timestamp)})<br/>
+                ${potencyScoreHtml}
+                RVOL: ${d.relative_volume_10d_calc.toFixed(2)}<br/>
+                <span style="color: ${getCellColor(d)};">Momentum: ${d.momentum}</span>
+            `;
+        }
+        
+        function renderCards(selection, data) {
+            const cells = selection.selectAll('.stock-card').data(data, d => d.name);
+            cells.exit().remove();
+
+            const enterCells = cells.enter().append("div").attr("class", "stock-card")
+                .on("click", (event, d) => window.open(`https://in.tradingview.com/chart/?symbol=${prepTickerForUrl(d.ticker)}`, "_blank"))
+                .on("mouseover", function(event, d) {
+                    tooltip.transition().duration(200).style("opacity", .9);
+                    tooltip.html(getTooltipHtml(d)).style("left", (event.pageX + 10) + "px").style("top", (event.pageY - 28) + "px");
+                })
+                .on("mouseout", () => tooltip.transition().duration(500).style("opacity", 0));
+
+            // Left Side: Logo and Ticker
+            const cardLeft = enterCells.append("div").attr("class", "card-left");
+            cardLeft.append("img").attr("class", "stock-logo");
+            cardLeft.append("div").attr("class", "stock-ticker");
+
+            // Right Side: Time, TFs, RVOL/Potency
+            const cardRight = enterCells.append("div").attr("class", "card-right");
+            cardRight.append("div").attr("class", "fired-time");
+            cardRight.append("div").attr("class", "breakout-tfs");
+            cardRight.append("div").attr("class", "rvol-score");
+
+            const updateCells = enterCells.merge(cells);
+
+            // Apply momentum color to the entire card
+            updateCells.style("background-color", d => getCellColor(d)).style("border-color", d => {
+                // A slightly darker border for contrast
+                const color = d.momentum === 'Bullish' ? '#10b981' : d.momentum === 'Bearish' ? '#ef4444' : '#6b7280';
+                return d3.color(color).darker(0.5);
+            });
+
+            updateCells.select(".stock-logo")
+                .attr("src", d => d.logoid ? `https://s3-symbol-logo.tradingview.com/${d.logoid}.svg` : '')
+                .style("display", d => d.logoid ? 'block' : 'none');
+            
+            updateCells.select(".stock-ticker")
+                .text(d => d.name.replace('NSE:', ''));
+            
+            updateCells.select(".fired-time")
+                .text(d => `${formatTime(d.fired_timestamp)} (${timeAgo(d.fired_timestamp)})`);
+            
+            updateCells.select(".breakout-tfs")
+                .text(d => `TFs: ${Array.isArray(d.Breakout_TFs) ? d.Breakout_TFs.length : 1} (${d.highest_tf})`);
+
+            updateCells.select(".rvol-score")
+                .html(d => {
+                    const rvol = d.relative_volume_10d_calc;
+                    const potency = d.Potency_Score;
+                    const rvolText = (rvol === null || isNaN(rvol) || rvol === undefined) ? 'RVOL: N/A' : `RVOL: ${rvol.toFixed(1)}`;
+                    const potencyText = (potency === null || isNaN(potency) || potency === undefined) ? 'P: N/A' : `P: ${potency.toFixed(1)}`;
+                    return `${rvolText} | ${potencyText}`;
+                });
+        }
+
+        // Custom Grouping and Sorting Logic
+        function customGroupAndSort(data) {
+            // Group by the custom TF_GROUPS
+            const groupedData = d3.group(data, d => getGroupKey(d.highest_tf));
+
+            // Sort within each group
+            const sortedGroups = Array.from(groupedData.entries()).map(([groupName, stocks]) => {
+                // 1. Primary Sort: Fired Time (most recent first)
+                // 2. Secondary Sort: Number of TFs (most TFs first)
+                const sortedStocks = stocks.sort((a, b) => {
+                    const timeA = new Date(a.fired_timestamp);
+                    const timeB = new Date(b.fired_timestamp);
+                    if (timeB - timeA !== 0) return timeB - timeA;
+
+                    const tfsA = Array.isArray(a.Breakout_TFs) ? a.Breakout_TFs.length : 1;
+                    const tfsB = Array.isArray(b.Breakout_TFs) ? b.Breakout_TFs.length : 1;
+                    return tfsB - tfsA; // Higher number of TFs first
+                });
+                return [groupName, sortedStocks];
+            });
+            
+            // Sort the groups themselves (alphabetical by group key: 1., 2., 3.)
+            sortedGroups.sort((a, b) => a[0].localeCompare(b[0]));
+
+            return sortedGroups;
+        }
+
+        function renderFired(data) {
+            firedContainer.html(data.length === 0 ? "<p class='col-span-full text-gray-400 text-center py-4'>No recent breakouts found.</p>" : "");
+            if (data.length > 0) firedContainer.html("");
+
+            const sortedGroups = customGroupAndSort(data);
+            
+            const groups = firedContainer.selectAll('.timeframe-box').data(sortedGroups, d => d[0]);
+            groups.exit().remove();
+            
+            const enterGroups = groups.enter().append('div').attr('class', 'timeframe-box');
+            enterGroups.append('h2').attr('class', 'timeframe-title');
+            enterGroups.append('div').attr('class', 'grid-container');
+            
+            const updateGroups = enterGroups.merge(groups);
+            updateGroups.select('h2').text(d => `${d[0]} (${d[1].length})`);
+
+            updateGroups.each(function([group, stocks]) {
+                const container = d3.select(this).select('.grid-container');
+                renderCards(container, stocks);
+            });
+        }
+        
+        function renderAllFiredList(data) {
+            allFiredContainer.html("");
+            if (data.length === 0) {
+                allFiredContainer.html('<p class="col-span-full text-gray-400 text-center py-4">No breakouts have fired today.</p>');
+                return;
+            }
+
+            const sortedGroups = customGroupAndSort(data);
+
+            const groups = allFiredContainer.selectAll('.timeframe-box').data(sortedGroups, d => d[0]);
+            groups.exit().remove();
+            
+            const enterGroups = groups.enter().append('div').attr('class', 'timeframe-box');
+            enterGroups.append('h2').attr('class', 'timeframe-title');
+            enterGroups.append('div').attr('class', 'grid-container');
+            
+            const updateGroups = enterGroups.merge(groups);
+            updateGroups.select('h2').text(d => `${d[0]} (${d[1].length})`);
+
+            updateGroups.each(function([group, stocks]) {
+                // Ensure unique stocks for All Fired list, preserving the one with the latest fired_timestamp
+                const uniqueStocksMap = new Map();
+                stocks.forEach(d => {
+                    const existing = uniqueStocksMap.get(d.name);
+                    if (!existing || new Date(d.fired_timestamp) > new Date(existing.fired_timestamp)) {
+                        uniqueStocksMap.set(d.name, d);
+                    }
+                });
+                const uniqueStocks = Array.from(uniqueStocksMap.values());
+                
+                // Re-sort the unique stocks (optional, but good practice)
+                const finalSortedStocks = uniqueStocks.sort((a, b) => {
+                    const timeA = new Date(a.fired_timestamp);
+                    const timeB = new Date(b.fired_timestamp);
+                    if (timeB - timeA !== 0) return timeB - timeA;
+
+                    const tfsA = Array.isArray(a.Breakout_TFs) ? a.Breakout_TFs.length : 1;
+                    const tfsB = Array.isArray(b.Breakout_TFs) ? b.Breakout_TFs.length : 1;
+                    return tfsB - tfsA;
+                });
+                
+                const container = d3.select(this).select('.grid-container');
+                renderCards(container, finalSortedStocks); 
+            });
+        }
+
+
+        // --- Unchanged Functions (omitted for brevity, assume they are included after this) ---
+        // timeAgo, getCellColor, formatTime, prepTickerForUrl, getTooltipHtml, etc.
+        // setupControls, updateDashboard, fetchLatestData, startAutoRefresh, stopAutoRefresh,
+        // fetchAllFiredEvents, startAllFiredRefresh, stopAllFiredRefresh, showSettingsModal,
+        // hideSettingsModal, loadSettings, saveSettings, updateMarketFields, etc.
+        // --- NOTE: All original JavaScript functions must be included in the final file. ---
+
+
+        function applyFilters() {
+            const rvol = parseFloat(rvolFilter.value);
+            const selectedTimeframes = Array.from(timeframeFilters.querySelectorAll('input:checked')).map(el => el.value);
+            const filteredData = latestData.fired.filter(d => {
+                const rvolMatch = d.relative_volume_10d_calc >= rvol;
+                const timeframeMatch = selectedTimeframes.length === 0 || 
+                                       (Array.isArray(d.Breakout_TFs) && d.Breakout_TFs.some(tf => selectedTimeframes.includes(tf)));
+                return rvolMatch && timeframeMatch;
+            });
+            renderFired(filteredData);
+        }
+
+        function applyAllFiredFilters() {
+            const rvol = parseFloat(rvolFilter.value);
+            const selectedTimeframes = Array.from(timeframeFilters.querySelectorAll('input:checked')).map(el => el.value);
+            const filteredData = allFiredData.filter(d => {
+                const rvolMatch = d.relative_volume_10d_calc >= rvol;
+                const timeframeMatch = selectedTimeframes.length === 0 || 
+                                       (Array.isArray(d.Breakout_TFs) && d.Breakout_TFs.some(tf => selectedTimeframes.includes(tf)));
+                return rvolMatch && timeframeMatch;
+            });
+            renderAllFiredList(filteredData);
+        }
+
+
+        // Copy and paste all the remaining original JavaScript code from the provided file here,
+        // ensuring 'applyFilters' and 'applyAllFiredFilters' from the original file are
+        // replaced with the two updated versions above.
+        
+        // --- START OF REMAINING ORIGINAL JS CODE ---
+
+        function updateDashboard(data, source = 'auto-refresh') {
+            latestData = data;
+            applyFilters();
+            const timestamp = new Date().toLocaleTimeString();
+            if (source === 'manual') {
+                 scanStatus.textContent = `Manual refresh complete at ${timestamp}.`;
+            } else {
+                 scanStatus.textContent = `Last updated: ${timestamp}`;
+            }
+        }
+
+        async function fetchLatestData() {
+            try {
+                const response = await fetch('/get_latest_data');
+                if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+                const rawText = await response.text();
+                const sanitizedText = rawText.replace(/NaN/g, 'null').replace(/-Infinity/g, 'null').replace(/Infinity/g, 'null');
+                const data = JSON.parse(sanitizedText);
+                updateDashboard(data);
+            } catch (error) {
+                scanStatus.textContent = `Error fetching data.`;
+            }
+        }
+
+        function startAutoRefresh() {
+            if (autoRefreshInterval) clearInterval(autoRefreshInterval);
+            fetchLatestData();
+            autoRefreshInterval = setInterval(fetchLatestData, 50000);
+        }
+
+        function stopAutoRefresh() {
+            if (autoRefreshInterval) clearInterval(autoRefreshInterval);
+        }
+
+        async function fetchAllFiredEvents() {
+            if (allFiredContainer.style('display') !== 'none' || !isAllFiredLoaded) {
+                try {
+                    const response = await fetch('/get_all_fired_events');
+                    if (!response.ok) throw new Error('Failed to fetch');
+                    const rawText = await response.text();
+                    const sanitizedText = rawText.replace(/NaN/g, 'null').replace(/-Infinity/g, 'null').replace(/Infinity/g, 'null');
+                    allFiredData = JSON.parse(sanitizedText);
+                    applyAllFiredFilters();
+                    isAllFiredLoaded = true;
+                } catch (error) {
+                    allFiredContainer.html('<p class="col-span-full text-red-500 text-center">Error loading data.</p>');
+                }
+            }
+        }
+
+        function startAllFiredRefresh() {
+            fetchAllFiredEvents();
+            if (allFiredRefreshInterval) clearInterval(allFiredRefreshInterval);
+            allFiredRefreshInterval = setInterval(fetchAllFiredEvents, 10000);
+        }
+
+        function stopAllFiredRefresh() {
+            if (allFiredRefreshInterval) clearInterval(allFiredRefreshInterval);
+        }
+        
+        function showSettingsModal() { settingsModal.classList.remove('hidden'); }
+        function hideSettingsModal() { settingsModal.classList.add('hidden'); }
+
+        function loadSettings() {
+            const savedSettings = JSON.parse(localStorage.getItem('scannerSettings'));
+            if (savedSettings) {
+                Object.keys(savedSettings).forEach(key => {
+                    const input = settingsForm.elements[key];
+                    if (input) {
+                        if (Array.isArray(savedSettings[key])) {
+                            input.value = savedSettings[key].join(',');
+                        } else {
+                            input.value = savedSettings[key];
+                        }
+                    }
+                });
+                const marketValue = Array.isArray(savedSettings.market) ? savedSettings.market.join(',') : savedSettings.market;
+                if (marketValue && marketValue.toLowerCase().includes('america')) {
+                    marketToggle.checked = true;
+                } else {
+                    marketToggle.checked = false;
+                }
+            } else {
+                marketToggle.checked = true;
+                updateMarketFields(true);
+            }
+        }
+
+        async function saveSettings(event) {
+            event.preventDefault();
+            const formData = new FormData(settingsForm);
+            const newSettings = {};
+            for (const [key, value] of formData.entries()) {
+                newSettings[key] = isNaN(value) || value === '' ? value : Number(value);
+            }
+            localStorage.setItem('scannerSettings', JSON.stringify(newSettings));
+            try {
+                await fetch('/update_settings', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(newSettings)
+                });
+                hideSettingsModal();
+            } catch (error) {
+                alert("Error: Could not save settings to the server.");
+            }
+        }
+
+        const marketToggle = document.getElementById('market-toggle');
+        const min_value_traded = document.getElementById('min_value_traded');
+        const min_volume = document.getElementById('min_volume');
+
+        const marketPresets = {
+            india: {
+                market: "india",
+                min_value_traded: 1000000,
+                min_volume: 50000,
+            },
+            america: {
+                market: "america",
+                min_value_traded: 10000000,
+                min_volume: 10000,
+            }
+        };
+
+        function updateMarketFields(isAmerica) {
+            const preset = isAmerica ? marketPresets.america : marketPresets.india;
+            settingsForm.elements['market'].value = preset.market;
+            min_value_traded.value = preset.min_value_traded;
+            min_volume.value = preset.min_volume;
+        }
+
+        marketToggle.addEventListener('change', (event) => {
+            updateMarketFields(event.target.checked);
+        });
+
+        // The setupControls function from the original file (with modified filter logic below)
+        function setupControls() {
+            d3.selectAll('.section-title').on('click', function() {
+                const titleEl = d3.select(this);
+                const wrapper = d3.select(this.parentNode);
+                const container = wrapper.select('#fired-container, #all-fired-container'); 
+                if (container.empty()) return;
+                const isCollapsed = container.style('display') === 'none';
+                let displayStyle = 'grid'; // Changed from 'block' to 'grid' for the main container
+                container.style('display', isCollapsed ? displayStyle : 'none');
+                titleEl.classed('collapsed', !isCollapsed);
+                if (titleEl.attr('id') === 'all-fired-title') {
+                    if (isCollapsed) {
+                        startAllFiredRefresh();
+                    } else {
+                        stopAllFiredRefresh();
+                    }
+                }
+            });
+
+            rvolFilter.addEventListener('input', () => {
+                rvolValue.textContent = rvolFilter.value;
+                applyFilters();
+                applyAllFiredFilters();
+            });
+
+            tfOrder.forEach(tf => {
+                const label = document.createElement('label');
+                label.className = "flex items-center space-x-2 text-sm text-gray-300";
+                const checkbox = document.createElement('input');
+                checkbox.type = 'checkbox';
+                checkbox.value = tf;
+                checkbox.className = "form-checkbox h-4 w-4 text-blue-600 bg-gray-700 border-gray-600 rounded";
+                checkbox.addEventListener('change', () => {
+                    applyFilters();
+                    applyAllFiredFilters();
+                });
+                label.appendChild(checkbox);
+                label.appendChild(document.createTextNode(tf));
+                timeframeFilters.appendChild(label);
+            });
+        }
+        
+        setupControls();
+        loadSettings();
+        startAutoRefresh();
+
+        settingsBtn.addEventListener('click', showSettingsModal);
+        closeSettingsBtn.addEventListener('click', hideSettingsModal);
+        cancelSettingsBtn.addEventListener('click', hideSettingsModal);
+        settingsForm.addEventListener('submit', saveSettings);
+
+        const scanBtn = document.getElementById('scan-btn');
+        scanBtn.addEventListener('click', async () => {
+            scanBtn.classList.add('loading');
+            scanBtn.disabled = true;
+            scanStatus.textContent = 'Manual scan in progress...';
+            try {
+                const response = await fetch('/manual_scan', { method: 'POST' });
+                if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+                // Since manual scan triggers an update, we should refresh the data
+                await fetchLatestData(); 
+            } catch (error) {
+                scanStatus.textContent = 'Manual scan failed. See console for details.';
+            } finally {
+                scanBtn.classList.remove('loading');
+                scanBtn.disabled = false;
+            }
+        });
+
+        // --- END OF REMAINING ORIGINAL JS CODE ---
+
+    </script>
+</body>
+</html>
