@@ -13,7 +13,7 @@ import time
 import os
 
 from multi_strategy_scanner import get_scanner
-from config import *
+import config
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -42,6 +42,21 @@ def start_background_scanner():
 def index():
     """Serve the main dashboard"""
     return render_template('dashboard.html')
+
+@app.route('/advanced')
+def advanced():
+    """Serve the advanced dashboard"""
+    return render_template('advanced_dashboard.html')
+
+@app.route('/breakout')
+def breakout():
+    """Serve the breakout dashboard"""
+    return render_template('breakout_dashboard.html')
+
+@app.route('/treemap')
+def treemap():
+    """Serve the treemap dashboard"""
+    return render_template('breakout_treemap.html')
 
 @app.route('/api/data')
 def get_scan_data():
@@ -114,20 +129,23 @@ def manage_settings():
     """Get or update scanner settings"""
     if request.method == 'GET':
         return jsonify({
-            'scan_interval': SCAN_INTERVAL,
-            'max_results_per_strategy': MAX_RESULTS_PER_STRATEGY,
-            'min_price': MIN_PRICE,
-            'max_price': MAX_PRICE,
-            'min_volume': MIN_VOLUME,
-            'min_value_traded': MIN_VALUE_TRADED,
-            'adx_min': TREND_SETTINGS['adx_min'],
-            'adx_max': TREND_SETTINGS['adx_max'],
-            'high_potential_tfs': HIGH_POTENTIAL_TFS,
-            'high_probability_tfs': HIGH_PROBABILITY_TFS
+            'scan_interval': config.SCAN_INTERVAL,
+            'max_results_per_strategy': config.MAX_RESULTS_PER_STRATEGY,
+            'min_price': config.MIN_PRICE,
+            'max_price': config.MAX_PRICE,
+            'min_volume': config.MIN_VOLUME,
+            'min_value_traded': config.MIN_VALUE_TRADED,
+            'adx_min': config.TREND_SETTINGS['adx_min'],
+            'adx_max': config.TREND_SETTINGS['adx_max'],
+            'high_potential_tfs': config.HIGH_POTENTIAL_TFS,
+            'high_probability_tfs': config.HIGH_PROBABILITY_TFS
         })
 
     elif request.method == 'POST':
         data = request.json
+        for key, value in data.items():
+            if hasattr(config, key):
+                setattr(config, key, value)
         return jsonify({'message': 'Settings updated successfully'})
 
 @app.route('/api/stats')
@@ -212,11 +230,11 @@ if __name__ == '__main__':
         import atexit
         atexit.register(cleanup)
 
-        logger.info(f"Starting Flask server on {FLASK_HOST}:{FLASK_PORT}")
+        logger.info(f"Starting Flask server on {config.FLASK_HOST}:{config.FLASK_PORT}")
         app.run(
-            host=FLASK_HOST,
-            port=FLASK_PORT,
-            debug=False,
+            host=config.FLASK_HOST,
+            port=config.FLASK_PORT,
+            debug=True,
             threaded=True
         )
 
