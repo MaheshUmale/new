@@ -1,7 +1,0 @@
-flask
-pandas
-pymongo
-tradingview-screener
-rookiepy
-requests
-lxml

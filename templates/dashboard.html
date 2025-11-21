@@ -307,6 +307,7 @@
 
         <div class="controls">
             <div class="control-group">
+                <button id="manualScanBtn" class="btn">🔄 Run Manual Scan</button>
                 <span id="lastUpdated" class="refresh-indicator" style="display: none;"></span>
             </div>
             <div class="control-group">
@@ -370,11 +371,16 @@
                             <th>RSI</th>
                             <th>Pullback Depth</th>
                             <th>Potency Score</th>
+                            <th>Entry</th>
+                            <th>SL</th>
+                            <th>Target</th>
+                            <th>Pos. Size</th>
+                            <th>Trade Value</th>
                             <th>Sector</th>
                         </tr>
                     </thead>
                     <tbody id="pullbackTable">
-                        <tr><td colspan="8" class="loading">Loading pullback opportunities...</td></tr>
+                        <tr><td colspan="13" class="loading">Loading pullback opportunities...</td></tr>
                     </tbody>
                 </table>
             </div>
@@ -384,6 +390,7 @@
     <script>
         class MultiStrategyDashboard {
             constructor() {
+                this.apiBase = '/api';
                 this.refreshInterval = 30000; // 30 seconds
                 this.autoRefresh = true;
                 this.refreshTimer = null;
@@ -391,39 +398,52 @@
             }
 
             init() {
+                this.setupEventListeners();
                 this.loadData();
                 this.startAutoRefresh();
             }
 
+            setupEventListeners() {
+                document.getElementById('manualScanBtn').addEventListener('click', () => {
+                    this.runManualScan();
+                });
+            }
+
             async loadData() {
                 try {
-                    const response = await fetch('/data');
-                    const rawText = await response.text();
-                    const cleanText = rawText.replace(/(:)\s*NaN(,|\s*})/g, '$1null$2');
-                    const data = JSON.parse(cleanText);
+                    // Load scan data
+                    const response = await fetch(`${this.apiBase}/data`);
+                    const data = await response.json();
 
-                    this.updateDashboard(data);
+                    // Load stats
+                    const statsResponse = await fetch(`${this.apiBase}/stats`);
+                    const stats = await statsResponse.json();
+
+                    this.updateDashboard(data, stats);
                     this.updateLastUpdated();
+
                 } catch (error) {
                     console.error('Error loading data:', error);
                     this.showError('Failed to load scan data. Please check connection.');
                 }
             }
 
-            updateDashboard(data) {
-                const highPotentialData = data.filter(d => d.Strategy_Type === 'High_Potential');
-                const highProbabilityData = data.filter(d => d.Strategy_Type === 'High_Probability');
+            updateDashboard(data, stats) {
+                // Update stats
+                this.updateStats(stats);
 
-                this.updateSqueezeHeatmap(highPotentialData);
-                this.updatePullbackTable(highProbabilityData);
+                // Update squeeze heatmap
+                this.updateSqueezeHeatmap(data.squeeze_data || []);
 
-                document.getElementById('totalResults').textContent = data.length || 0;
-                document.getElementById('squeezeCount').textContent = highPotentialData.length || 0;
-                document.getElementById('pullbackCount').textContent = highProbabilityData.length || 0;
+                // Update pullback table
+                this.updatePullbackTable(data.pullback_data || []);
+            }
 
-                const totalPotency = data.reduce((acc, item) => acc + (item.potency_score || 0), 0);
-                const avgPotency = data.length > 0 ? totalPotency / data.length : 0;
-                document.getElementById('avgPotency').textContent = avgPotency.toFixed(2);
+            updateStats(stats) {
+                document.getElementById('totalResults').textContent = stats.total_results || 0;
+                document.getElementById('squeezeCount').textContent = stats.squeeze_count || 0;
+                document.getElementById('pullbackCount').textContent = stats.pullback_count || 0;
+                document.getElementById('avgPotency').textContent = (stats.avg_potency_score || 0).toFixed(2);
             }
 
             updateSqueezeHeatmap(squeezeData) {
@@ -438,14 +458,14 @@
                 const sortedData = squeezeData.sort((a, b) => (b.potency_score || 0) - (a.potency_score || 0));
 
                 container.innerHTML = sortedData.slice(0, 20).map(stock => {
-                    const score = (stock.potency_score || 0) * 100;
+                    const score = (stock.potency_score || 0);
                     const scoreClass = score >= 70 ? 'potency-high' : score >= 40 ? 'potency-medium' : 'potency-low';
 
                     return `
-                        <div class="heatmap-cell" onclick="window.open('https://in.tradingview.com/chart/?symbol=${stock.ticker}', '_blank')">
+                        <div class="heatmap-cell" onclick="window.open('https://in.tradingview.com/chart/?symbol=${stock.ticker.replace('&', '_')}', '_blank')" title="Entry: $${(stock.entry_price || 0).toFixed(2)}\nSL: $${(stock.stop_loss || 0).toFixed(2)}\nTarget: $${(stock.target_price || 0).toFixed(2)}">
                             <div class="cell-ticker">${stock.ticker}</div>
                             <div class="cell-price">$${(stock.price || 0).toFixed(2)}</div>
-                            <div class="cell-score ${scoreClass}">Score: ${score.toFixed(0)}%</div>
+                            <div class="cell-score ${scoreClass}">Score: ${score.toFixed(2)}</div>
                             <div class="cell-timeframe">${stock.timeframe}</div>
                         </div>
                     `;
@@ -456,7 +476,7 @@
                 const tbody = document.getElementById('pullbackTable');
 
                 if (!pullbackData || pullbackData.length === 0) {
-                    tbody.innerHTML = '<tr><td colspan="8" class="empty-state">No pullback opportunities found</td></tr>';
+                    tbody.innerHTML = '<tr><td colspan="13" class="empty-state">No pullback opportunities found</td></tr>';
                     return;
                 }
 
@@ -464,23 +484,57 @@
                 const sortedData = pullbackData.sort((a, b) => (b.potency_score || 0) - (a.potency_score || 0));
 
                 tbody.innerHTML = sortedData.map(stock => {
-                    const score = (stock.potency_score || 0) * 100;
+                    const score = (stock.potency_score || 0);
                     const scoreClass = score >= 70 ? 'potency-high' : score >= 40 ? 'potency-medium' : 'potency-low';
                     const pullbackDepth = ((stock.pullback_depth || 0) * 100).toFixed(1);
 
                     return `
-                        <tr onclick="window.open('https://in.tradingview.com/chart/?symbol=${stock.ticker}', '_blank')" style="cursor: pointer;">
+                        <tr onclick="window.open('https://in.tradingview.com/chart/?symbol=${stock.ticker.replace('&', '_')}', '_blank')" style="cursor: pointer;">
                             <td><strong>${stock.ticker}</strong></td>
                             <td>${stock.timeframe}</td>
                             <td>$${(stock.price || 0).toFixed(2)}</td>
                             <td>${(stock.adx || 0).toFixed(1)}</td>
                             <td>${(stock.rsi || 0).toFixed(1)}</td>
                             <td>${pullbackDepth}%</td>
-                            <td><span class="potency-badge ${scoreClass}">${score.toFixed(0)}%</span></td>
+                            <td><span class="potency-badge ${scoreClass}">${score.toFixed(2)}</span></td>
+                            <td>$${(stock.entry_price || 0).toFixed(2)}</td>
+                            <td>$${(stock.stop_loss || 0).toFixed(2)}</td>
+                            <td>$${(stock.target_price || 0).toFixed(2)}</td>
+                            <td>${stock.position_size || 0}</td>
+                            <td>$${(stock.total_trade_value || 0).toFixed(2)}</td>
                             <td>${stock.sector || 'Unknown'}</td>
                         </tr>
                     `;
                 }).join('');
+            }
+
+            async runManualScan() {
+                const btn = document.getElementById('manualScanBtn');
+                btn.disabled = true;
+                btn.textContent = '🔄 Scanning...';
+
+                try {
+                    const response = await fetch(`${this.apiBase}/run-scan`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' }
+                    });
+
+                    const result = await response.json();
+
+                    if (response.ok) {
+                        this.showMessage(result.message || 'Scan initiated successfully');
+                        // Wait a bit then reload data
+                        setTimeout(() => this.loadData(), 5000);
+                    } else {
+                        this.showError(result.error || 'Scan failed');
+                    }
+                } catch (error) {
+                    console.error('Error running manual scan:', error);
+                    this.showError('Failed to initiate manual scan');
+                } finally {
+                    btn.disabled = false;
+                    btn.textContent = '🔄 Run Manual Scan';
+                }
             }
 
             startAutoRefresh() {

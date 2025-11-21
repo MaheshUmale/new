@@ -36,6 +36,9 @@ TIMEFRAME_MAP = {
     '1M': '|1M',
 }
 
+import math
+
+
 @dataclass
 class ScanResult:
     """Data class for scan results"""
@@ -58,6 +61,11 @@ class ScanResult:
     volume_ratio: Optional[float] = None
     potency_score: Optional[float] = None
     timestamp: Optional[datetime] = None
+    entry_price: Optional[float] = None
+    stop_loss: Optional[float] = None
+    target_price: Optional[float] = None
+    position_size: Optional[int] = None
+    total_trade_value: Optional[float] = None
 
 class MultiStrategyScanner:
     """Main scanner class that implements both strategies"""
@@ -89,30 +97,29 @@ class MultiStrategyScanner:
         """Generate query for squeeze breakout patterns"""
         tf_suffix = TIMEFRAME_MAP.get(timeframe, '')
         
-        # Squeeze conditions - use And() for complex conditions
-        squeeze_condition = And(
-            col(f'KltChnl.lower{tf_suffix}') > col(f'BB.lower{tf_suffix}'),  # Squeeze condition
-            col(f'KltChnl.upper{tf_suffix}') < col(f'BB.upper{tf_suffix}'),  # Squeeze condition
-            col(f'volume{tf_suffix}') >= MIN_VOLUME,  # Volume filter
-            col(f'close{tf_suffix}') > col(f'SMA20{tf_suffix}')  # Price above 20 SMA
+        squeeze_condition = Or(
+            And(col(f'BB.upper{tf_suffix}') < col(f'KltChnl.upper{tf_suffix}'), col(f'BB.lower{tf_suffix}') > col(f'KltChnl.lower{tf_suffix}')),
         )
         
-        # Volume and price filters
         base_conditions = And(
-            col('close') >= MIN_PRICE,
-            col('close') <= MAX_PRICE,
-            col('volume') >= MIN_VOLUME,
+            col('beta_1_year') >= MIN_BETA,
+            col('is_primary') == True,
+            col('typespecs').has('common'),
+            col('type') == 'stock',
+            col('close').between(MIN_PRICE, MAX_PRICE),
+            col('active_symbol') == True,
+            col('exchange')== DEFAULT_EXCHANGE,
             col(f'Value.Traded{tf_suffix}') >= MIN_VALUE_TRADED,
         )
         
-        # Combine conditions
         query = Query().select(
-            'name', 'close', 'volume', 'market_cap_basic', 'sector', 'exchange',
+            'name', 'close', 'volume', 'market_cap_basic', 'sector', 'exchange', 'logoid', 'beta_1_year', 'relative_volume_10d_calc|5',
+            'ATR', 'ATR|5', 'ADX|60', 'BB.upper', 'BB.lower', 'EMA20', 'EMA200', 'EMA5|5',
             f'KltChnl.lower{tf_suffix}', f'KltChnl.upper{tf_suffix}', f'BB.lower{tf_suffix}', f'BB.upper{tf_suffix}',
             f'volume{tf_suffix}', f'SMA20{tf_suffix}', f'close{tf_suffix}', f'RSI{tf_suffix}',
             f'open{tf_suffix}', f'high{tf_suffix}', f'low{tf_suffix}', f'ATR{tf_suffix}', f'Value.Traded{tf_suffix}'
         ).where2(
-            And(squeeze_condition, base_conditions)
+            And(base_conditions, squeeze_condition)
         ).order_by(
             f'volume{tf_suffix}', ascending=False
         ).limit(MAX_RESULTS_PER_STRATEGY)
@@ -123,120 +130,107 @@ class MultiStrategyScanner:
         """Generate query for trending stocks with pullback opportunities"""
         tf_suffix = TIMEFRAME_MAP.get(timeframe, '')
         
-        # Trend strength conditions - simplified to avoid multiplication issues
         trend_conditions = And(
-            col(f'ADX{tf_suffix}') >= TREND_SETTINGS['adx_min'],
-            col(f'ADX{tf_suffix}') <= TREND_SETTINGS['adx_max'],
-            col(f'close{tf_suffix}') > col(f'SMA50{tf_suffix}'),  # Above 50 SMA
-            col(f'EMA20{tf_suffix}') > col(f'EMA50{tf_suffix}'),    # EMA alignment
-            # Use RSI to identify pullback instead of percentage range
-            col(f'RSI{tf_suffix}').between(30, 60)  # RSI in pullback zone
+            col(f'ADX{tf_suffix}').between(TREND_SETTINGS['adx_min'], TREND_SETTINGS['adx_max']),
+            col(f'close{tf_suffix}') > col(f'SMA50{tf_suffix}'),
+            col(f'EMA20{tf_suffix}') > col(f'EMA50{tf_suffix}'),
+            col(f'RSI{tf_suffix}').between(30, 60)
         )
         
-        # Volume and price filters
         base_conditions = And(
-            col('close') >= MIN_PRICE,
-            col('close') <= MAX_PRICE,
-            col('volume') >= MIN_VOLUME,
+            col('beta_1_year') >= MIN_BETA,
+            col('is_primary') == True,
+            col('typespecs').has('common'),
+            col('type') == 'stock',
+            col('close').between(MIN_PRICE, MAX_PRICE),
+            col('active_symbol') == True,
+            col('exchange')== DEFAULT_EXCHANGE,
             col(f'Value.Traded{tf_suffix}') >= MIN_VALUE_TRADED,
         )
-        
-        # Combine conditions
+
         query = Query().select(
-            'name', 'close', 'volume', 'market_cap_basic', 'sector', 'exchange',
+            'name', 'close', 'volume', 'market_cap_basic', 'sector', 'exchange', 'logoid', 'beta_1_year', 'relative_volume_10d_calc|5',
+            'ATR', 'ATR|5', 'ADX|60', 'BB.upper', 'BB.lower', 'EMA20', 'EMA200', 'EMA5|5',
             f'ADX{tf_suffix}', f'RSI{tf_suffix}', f'SMA20{tf_suffix}', f'SMA50{tf_suffix}',
             f'EMA20{tf_suffix}', f'EMA50{tf_suffix}', f'close{tf_suffix}', f'open{tf_suffix}', f'volume{tf_suffix}',
             f'high{tf_suffix}', f'low{tf_suffix}', f'ATR{tf_suffix}', f'Value.Traded{tf_suffix}'
         ).where2(
-            And(trend_conditions, base_conditions)
+            And(base_conditions, trend_conditions)
         ).order_by(
             f'ADX{tf_suffix}', ascending=False
         ).limit(MAX_RESULTS_PER_STRATEGY)
         
         return query
     
-    def calculate_potency_score(self, row: pd.Series, strategy_type: str) -> float:
-        """Calculate potency score based on strategy type with robust scalar handling"""
-        score = 0.0
+    def calculate_potency_score(self, stock: pd.Series) -> (float, str, int):
+        """
+        Calculates the Potency Score based on RVOL and Setup quality.
+        Applies the new, precise Squeeze condition post-data retrieval.
+        """
+        potency = 0
+        tf_order_score = 0
+        setup_type_score = 0
+        setup_type = None
 
-        # Common metrics
-        close_val = self._safe_float(row, 'close')
-        atr_val = self._safe_float(row, 'ATR')
-        rsi_val = self._safe_float(row, 'RSI')
-        adx_val = self._safe_float(row, 'ADX')
+        # 1. RVOL Factor Score (Max 25 points)
+        rvol_factor = min(self._safe_float(stock, 'relative_volume_10d_calc|5') or 0, 3.0)
+        potency += WEIGHTS['W_RVOL'] * rvol_factor
 
-        if strategy_type == 'High_Potential':
-            # Volume ratio contribution (prefer provided, else fallback if possible)
-            vr = row.get('volume_ratio')
-            if isinstance(vr, pd.Series):
-                vr = vr.dropna().iloc[0] if len(vr.dropna()) else None
-            if vr is None:
-                vol = self._safe_float(row, 'volume')
-                avg_vol = self._safe_float(row, 'average_volume_10d_calc')
-                if vol is not None and avg_vol is not None and avg_vol > 0:
-                    vr = vol / avg_vol
-            if vr is not None:
-                try:
-                    score += min(float(vr) * 0.2, 0.2)
-                except Exception:
-                    pass
+        # 2. Setup Identification (Precise Squeeze and Pullback)
+        squeeze_found = False
+        for tf in [60, 30, 15]:
+            bb_upper = self._safe_float(stock, f'BB.upper|{tf}')
+            bb_lower = self._safe_float(stock, f'BB.lower|{tf}')
+            klt_upper = self._safe_float(stock, f'KltChnl.upper|{tf}')
+            klt_lower = self._safe_float(stock, f'KltChnl.lower|{tf}')
 
-            # RSI contribution if present
-            if rsi_val is not None:
-                rsi_score = 1.0 - abs(rsi_val - 50.0) / 50.0
-                score += rsi_score * 0.3
+            if all(v is not None for v in [bb_upper, bb_lower, klt_upper, klt_lower]):
+                bb_width = bb_upper - bb_lower
+                klt_width = klt_upper - klt_lower
+                if klt_width > 0 and (bb_width < WEIGHTS['SQZ_WIDTH_FACTOR'] * klt_width):
+                    squeeze_found = True
+                    if tf == 60 and tf_order_score < 3: tf_order_score = 3
+                    elif tf == 30 and tf_order_score < 2: tf_order_score = 2
+                    elif tf == 15 and tf_order_score < 1: tf_order_score = 1
+                    if tf_order_score == 3: break
 
-            # Volatility contribution based on ATR/close
-            if atr_val is not None and close_val is not None and close_val > 0:
-                volatility_ratio = atr_val / close_val
-                score += min(volatility_ratio * 10.0, 0.3)
+        stock['is_squeeze_ready'] = squeeze_found
+        stock['is_pullback_ready'] = (self._safe_float(stock, 'ADX|60') or 0) >= 25.0
 
-            score += 0.2  # Base score for squeeze potential
+        if stock['is_pullback_ready']:
+            setup_type = 'Pullback'
+            setup_type_score = 8
+            if tf_order_score < 3: tf_order_score = 3
 
-        elif strategy_type == 'High_Probability':
-            # ADX contribution
-            if adx_val is not None:
-                adx_score = min(adx_val / 50.0, 1.0)
-                score += adx_score * 0.4
+        if stock['is_squeeze_ready']:
+            setup_type = 'Breakout'
+            setup_type_score = 10
 
-            # RSI contribution
-            if rsi_val is not None:
-                if rsi_val <= PULLBACK_SETTINGS['rsi_oversold']:
-                    score += 0.3
-                elif rsi_val <= 50.0:
-                    score += 0.2
+        if setup_type is not None:
+            potency += WEIGHTS['W_TF'] * tf_order_score
+            potency += setup_type_score
 
-            # Volume ratio contribution if available
-            vr = row.get('volume_ratio')
-            if isinstance(vr, pd.Series):
-                vr = vr.dropna().iloc[0] if len(vr.dropna()) else None
-            if vr is None:
-                vol = self._safe_float(row, 'volume')
-                avg_vol = self._safe_float(row, 'average_volume_10d_calc')
-                if vol is not None and avg_vol is not None and avg_vol > 0:
-                    vr = vol / avg_vol
-            if vr is not None:
-                try:
-                    score += min(float(vr) * 0.1, 0.2)
-                except Exception:
-                    pass
+        return round(potency, 2), setup_type, tf_order_score
 
-            # Pullback depth contribution (compute if not provided)
-            pdpth = row.get('pullback_depth')
-            if isinstance(pdpth, pd.Series):
-                pdpth = pdpth.dropna().iloc[0] if len(pdpth.dropna()) else None
-            if pdpth is None:
-                ema20 = self._safe_float(row, 'EMA20')
-                if ema20 is not None and close_val is not None and ema20 > 0:
-                    pdpth = (ema20 - close_val) / ema20
-            if pdpth is not None:
-                try:
-                    if PULLBACK_SETTINGS['min_pullback_depth'] <= pdpth <= PULLBACK_SETTINGS['max_pullback_depth']:
-                        score += 0.1
-                except Exception:
-                    pass
+    def calculate_trade_management(self, stock: pd.Series, entry_price: float) -> (float, float, int, float, float):
+        """
+        Calculates SL, Target, and Position Size based on 1:2 R:R and Max Risk.
+        """
+        atr_5m = self._safe_float(stock, 'ATR|5') or 0.0
+        risk_per_share = WEIGHTS['ATR_SL_MULTIPLE'] * atr_5m
+        target_distance = risk_per_share * WEIGHTS['RR_RATIO']
 
-        return min(score, 1.0)
+        if risk_per_share == 0 or entry_price == 0:
+            return 0, 0, 0, 0.0, 0.0
+
+        max_shares_by_risk = math.floor(WEIGHTS['MAX_RISK_RS'] / risk_per_share)
+        max_shares_by_capital = math.floor(WEIGHTS['MAX_CAPITAL_RS'] / entry_price)
+        position_size = int(min(max_shares_by_risk, max_shares_by_capital))
+
+        total_trade_value = position_size * entry_price
+        actual_risk = position_size * risk_per_share
+
+        return risk_per_share, target_distance, position_size, total_trade_value, actual_risk
     
     def process_scan_results(self, df: pd.DataFrame, strategy_type: str, timeframe: str) -> List[ScanResult]:
         """Process scan results and convert to ScanResult objects"""
@@ -244,47 +238,43 @@ class MultiStrategyScanner:
         
         for _, row in df.iterrows():
             try:
-                # Calculate derived metrics
-                if strategy_type == 'High_Probability':
-                    pullback_depth = None
-                    close_value = self._safe_float(row, 'close')
-                    ema20_value = self._safe_float(row, 'EMA20')
-                    if ema20_value is not None and close_value is not None and ema20_value > 0:
-                        pullback_depth = (ema20_value - close_value) / ema20_value
-                    volume_ratio = None
-                    vol = self._safe_float(row, 'volume')
-                    avg_vol = self._safe_float(row, 'average_volume_10d_calc')
-                    if vol is not None and avg_vol is not None and avg_vol > 0:
-                        volume_ratio = vol / avg_vol
-                else:
-                    pullback_depth = None
-                    # keep provided ratio if exists
-                    volume_ratio = row.get('volume_ratio', None)
-                
-                # Create ScanResult object
-                result = ScanResult(
-                    ticker=row.get('name', 'Unknown'),
-                    strategy_type=strategy_type,
-                    timeframe=timeframe,
-                    price=self._safe_float(row, 'close') or 0.0,
-                    volume=self._safe_float(row, 'volume') or 0.0,
-                    market_cap=row.get('market_cap_basic', 0),
-                    sector=row.get('sector', 'Unknown'),
-                    exchange=row.get('exchange', 'Unknown'),
-                    squeeze_status='Active' if strategy_type == 'High_Potential' else None,
-                    trend_strength=self._safe_float(row, 'ADX'),
-                    pullback_depth=pullback_depth,
-                    adx=self._safe_float(row, 'ADX'),
-                    rsi=self._safe_float(row, 'RSI'),
-                    sma50=self._safe_float(row, 'SMA50'),
-                    ema20=self._safe_float(row, 'EMA20'),
-                    bb_position=None,
-                    volume_ratio=volume_ratio,
-                    potency_score=self.calculate_potency_score(row, strategy_type),
-                    timestamp=datetime.now()
-                )
-                
-                results.append(result)
+                potency, setup_type, _ = self.calculate_potency_score(row)
+                if setup_type is None:
+                    continue
+
+                entry_price = self._safe_float(row, 'close|5')
+                risk_per_share, target_distance, position_size, total_trade_value, _ = self.calculate_trade_management(row, entry_price)
+
+                if position_size > 0:
+                    is_long = strategy_type in ['long_breakout', 'long_continuation']
+                    stop_loss = entry_price - risk_per_share if is_long else entry_price + risk_per_share
+                    target_price = entry_price + target_distance if is_long else entry_price - target_distance
+
+                    result = ScanResult(
+                        ticker=row.get('name', 'Unknown'),
+                        strategy_type=strategy_type,
+                        timeframe=timeframe,
+                        price=self._safe_float(row, 'close') or 0.0,
+                        volume=self._safe_float(row, 'volume') or 0.0,
+                        market_cap=row.get('market_cap_basic', 0),
+                        sector=row.get('sector', 'Unknown'),
+                        exchange=row.get('exchange', 'Unknown'),
+                        squeeze_status='Active' if setup_type == 'Breakout' else None,
+                        trend_strength=self._safe_float(row, 'ADX'),
+                        pullback_depth=(self._safe_float(row, 'EMA20') - self._safe_float(row, 'close')) / self._safe_float(row, 'EMA20') if self._safe_float(row, 'EMA20') else None,
+                        adx=self._safe_float(row, 'ADX'),
+                        rsi=self._safe_float(row, 'RSI'),
+                        sma50=self._safe_float(row, 'SMA50'),
+                        ema20=self._safe_float(row, 'EMA20'),
+                        potency_score=potency,
+                        timestamp=datetime.now(),
+                        entry_price=entry_price,
+                        stop_loss=stop_loss,
+                        target_price=target_price,
+                        position_size=position_size,
+                        total_trade_value=total_trade_value,
+                    )
+                    results.append(result)
                 
             except Exception as e:
                 logger.error(f"Error processing row for {row.get('name', 'Unknown')}: {e}")
@@ -376,18 +366,15 @@ class MultiStrategyScanner:
         """Run complete multi-strategy scan"""
         logger.info("Starting full multi-strategy scan...")
         
-        # Run both strategies
-        squeeze_results = self.run_strategy_scan('High_Potential', HIGH_POTENTIAL_TFS)
-        trending_results = self.run_strategy_scan('High_Probability', HIGH_PROBABILITY_TFS)
+        long_breakout_results = self.run_strategy_scan('long_breakout', HIGH_POTENTIAL_TFS)
+        short_breakout_results = self.run_strategy_scan('short_breakout', HIGH_POTENTIAL_TFS)
+        long_continuation_results = self.run_strategy_scan('long_continuation', HIGH_PROBABILITY_TFS)
+        short_continuation_results = self.run_strategy_scan('short_continuation', HIGH_PROBABILITY_TFS)
         
-        # Combine results
-        all_results = squeeze_results + trending_results
+        all_results = long_breakout_results + short_breakout_results + long_continuation_results + short_continuation_results
         
         if all_results:
-            # Save to database
             self.save_results_to_db(all_results)
-            
-            # Return as DataFrame
             df = pd.DataFrame([vars(result) for result in all_results])
             logger.info(f"Full scan completed. Found {len(all_results)} total opportunities.")
             return df
