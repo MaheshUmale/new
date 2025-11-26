@@ -13,6 +13,7 @@ import time
 import os
 
 from multi_strategy_scanner import get_scanner
+from tradingview_scanner import get_screener_data
 import config
 
 # Configure logging
@@ -57,6 +58,34 @@ def breakout():
 def treemap():
     """Serve the treemap dashboard"""
     return render_template('breakout_treemap.html')
+
+@app.route('/tradingview')
+def tradingview():
+    """Serve the tradingview dashboard"""
+    return render_template('tradingview_dashboard.html')
+
+@app.route('/api/tradingview-data')
+def get_tradingview_data():
+    """Get latest tradingview scan results"""
+    try:
+        filters = request.args.to_dict()
+        df = get_screener_data(filters)
+        if df is None or df.empty:
+            return jsonify({
+                'data': [],
+                'total_results': 0
+            })
+
+        data = df.to_dict('records')
+
+        return jsonify({
+            'data': data,
+            'total_results': len(df)
+        })
+
+    except Exception as e:
+        logger.error(f"Error getting tradingview scan data: {e}")
+        return jsonify({'error': str(e)}), 500
 
 @app.route('/api/data')
 def get_scan_data():

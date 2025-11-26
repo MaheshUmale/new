@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TradingView Scanner</title>
+    <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css">
+    <style>
+        body {
+            background-color: #222;
+            color: #ddd;
+        }
+        .filter-panel {
+            background-color: #333;
+            padding: 20px;
+            border-radius: 5px;
+        }
+        .table-dark-custom {
+            background-color: #2a2a2a;
+        }
+        .table-dark-custom th {
+            background-color: #3a3a3a;
+            color: #ccc;
+        }
+        .table-dark-custom td {
+            color: #ddd;
+        }
+        .table-dark-custom .form-control {
+            background-color: #444;
+            color: #ddd;
+            border: 1px solid #555;
+        }
+    </style>
+</head>
+<body>
+    <div class="container-fluid mt-4">
+        <div class="filter-panel">
+            <div class="row">
+                <div class="col-md-2">
+                    <label>Performance</label>
+                    <select id="performance" class="form-control">
+                        <option value="">Any</option>
+                        <option value="1">Up</option>
+                        <option value="-1">Down</option>
+                    </select>
+                </div>
+                <div class="col-md-2">
+                    <label>Market Cap</label>
+                    <select id="market_cap" class="form-control">
+                        <option value="">Any</option>
+                        <option value="10000000000">Large</option>
+                        <option value="2000000000">Mid</option>
+                        <option value="300000000">Small</option>
+                    </select>
+                </div>
+                <div class="col-md-2">
+                    <label>Volatility</label>
+                    <select id="volatility" class="form-control">
+                        <option value="">Any</option>
+                        <option value="0.5">Over 0.5</option>
+                        <option value="1">Over 1</option>
+                    </select>
+                </div>
+                <div class="col-md-2">
+                    <label>RSI (14)</label>
+                    <select id="rsi" class="form-control">
+                        <option value="">Any</option>
+                        <option value="70">Overbought (70)</option>
+                        <option value="30">Oversold (30)</option>
+                    </select>
+                </div>
+                <div class="col-md-2">
+                    <label>Gap</label>
+                    <select id="gap" class="form-control">
+                        <option value="">Any</option>
+                        <option value="1">Up</option>
+                        <option value="-1">Down</option>
+                    </select>
+                </div>
+            </div>
+        </div>
+
+        <div class="mt-4">
+            <table class="table table-bordered table-dark-custom">
+                <thead>
+                    <tr>
+                        <th>Ticker</th>
+                        <th>Name</th>
+                        <th>Close</th>
+                        <th>Volume</th>
+                        <th>Market Cap</th>
+                    </tr>
+                </thead>
+                <tbody id="screener-results">
+                    <!-- Data will be populated here by JavaScript -->
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            const performanceFilter = document.getElementById('performance');
+            const marketCapFilter = document.getElementById('market_cap');
+            const volatilityFilter = document.getElementById('volatility');
+            const rsiFilter = document.getElementById('rsi');
+            const gapFilter = document.getElementById('gap');
+
+            function fetchData() {
+                const filters = {
+                    'performance': performanceFilter.value,
+                    'market_cap': marketCapFilter.value,
+                    'volatility': volatilityFilter.value,
+                    'rsi': rsiFilter.value,
+                    'gap': gapFilter.value,
+                };
+
+                const queryString = new URLSearchParams(filters).toString();
+
+                fetch(`/api/tradingview-data?${queryString}`)
+                    .then(response => response.json())
+                    .then(data => {
+                        const resultsTable = document.getElementById('screener-results');
+                        resultsTable.innerHTML = ''; // Clear existing data
+
+                        if (data.data) {
+                            data.data.forEach((row, index) => {
+                                const tr = document.createElement('tr');
+                                tr.innerHTML = `
+                                    <td>${row['ticker']}</td>
+                                    <td>${row['name']}</td>
+                                    <td>${row['close']}</td>
+                                    <td>${row['volume']}</td>
+                                    <td>${row['market_cap_basic']}</td>
+                                `;
+                                resultsTable.appendChild(tr);
+                            });
+                        }
+                    })
+                    .catch(error => console.error('Error fetching data:', error));
+            }
+
+            performanceFilter.addEventListener('change', fetchData);
+            marketCapFilter.addEventListener('change', fetchData);
+            volatilityFilter.addEventListener('change', fetchData);
+            rsiFilter.addEventListener('change', fetchData);
+            gapFilter.addEventListener('change', fetchData);
+
+            // Initial data load
+            fetchData();
+        });
+    </script>
+</body>
+</html>
